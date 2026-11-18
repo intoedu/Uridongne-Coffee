@@ -32,6 +32,10 @@ a{text-decoration:none;color:inherit}img{display:block}
 .gate-btn{width:100%;padding:.75rem;background:var(--gold);color:white;border:none;border-radius:10px;font-size:.92rem;cursor:pointer;font-family:var(--sans)}
 .gate-btn:hover{background:#C08524}
 .gate-err{color:#c0392b;font-size:.8rem;margin-top:.5rem;display:none}
+.gate-box p.gate-err{color:#c0392b;margin-bottom:0}.gate-box p.gate-ok{color:#2e8b57;margin-bottom:0}
+.gate-box input[type=email],.gate-box input#gate-code{letter-spacing:normal}
+.gate-ok{color:#2e8b57;font-size:.8rem;margin-top:.5rem;display:none;line-height:1.5}
+.gate-switch{display:block;margin-top:1rem;font-size:.78rem;color:var(--text3);cursor:pointer;text-decoration:underline}
 
 /* ADMIN LAYOUT */
 .admin-wrap{display:flex;min-height:100vh;display:none}
@@ -126,8 +130,14 @@ a{text-decoration:none;color:inherit}img{display:block}
     <p>관리자 이메일과 비밀번호를 입력하세요</p>
     <input type="email" id="gate-email" placeholder="이메일" autocomplete="username" style="margin-bottom:.5rem" onkeydown="if(event.key==='Enter')document.getElementById('gate-pw').focus()">
     <input type="password" id="gate-pw" placeholder="비밀번호" autocomplete="current-password" onkeydown="if(event.key==='Enter')checkPw()">
+    <div id="signup-fields" style="display:none">
+      <input type="password" id="gate-pw2" placeholder="비밀번호 확인" autocomplete="new-password">
+      <input type="text" id="gate-code" placeholder="관리자 등록 코드" autocomplete="off">
+    </div>
     <p class="gate-err" id="gate-err">이메일 또는 비밀번호가 올바르지 않습니다</p>
-    <button class="gate-btn" id="gate-btn" onclick="checkPw()">로그인</button>
+    <p class="gate-ok" id="gate-ok"></p>
+    <button class="gate-btn" id="gate-btn" onclick="gateMode==='signup'?signUp():checkPw()">로그인</button>
+    <a class="gate-switch" id="gate-switch" onclick="toggleMode()">처음이신가요? 관리자 계정 만들기</a>
   </div>
 </div>
 <div id="toast"></div>
@@ -394,9 +404,42 @@ function cur(k){return {store:S,menu:menu,images:images,apps:apps,notices:notice
 let synced={};let syncing=false,pending=false,timer=null;
 function setSync(t,c){var el=document.getElementById('sync-status');if(el){el.textContent=t;el.style.color=c||'var(--text3)';}}
 
+let gateMode='login';
+function toggleMode(){
+  gateMode=gateMode==='login'?'signup':'login';var su=gateMode==='signup';
+  document.getElementById('signup-fields').style.display=su?'block':'none';
+  document.getElementById('gate-btn').textContent=su?'관리자 계정 만들기':'로그인';
+  document.getElementById('gate-switch').textContent=su?'이미 계정이 있으신가요? 로그인':'처음이신가요? 관리자 계정 만들기';
+  document.querySelector('.gate-box p').textContent=su?'이메일, 비밀번호(8자 이상), 등록 코드를 입력하세요':'관리자 이메일과 비밀번호를 입력하세요';
+  document.getElementById('gate-pw').autocomplete=su?'new-password':'current-password';
+  document.getElementById('gate-err').style.display='none';document.getElementById('gate-ok').style.display='none';
+}
+function gateMsg(t,ok){var e=document.getElementById('gate-err'),o=document.getElementById('gate-ok');e.style.display='none';o.style.display='none';var el=ok?o:e;el.textContent=t;el.style.display='block';}
+async function signUp(){
+  var em=document.getElementById('gate-email').value.trim(),pw=document.getElementById('gate-pw').value,pw2=document.getElementById('gate-pw2').value,code=document.getElementById('gate-code').value.trim().toUpperCase();
+  if(!em||!pw||!code)return gateMsg('모든 칸을 입력해 주세요');
+  if(pw.length<8)return gateMsg('비밀번호는 8자 이상이어야 합니다');
+  if(pw!==pw2)return gateMsg('비밀번호 확인이 일치하지 않습니다');
+  var btn=document.getElementById('gate-btn');btn.disabled=true;btn.textContent='처리 중…';
+  try{
+    try{localStorage.setItem('c_setup_code',code);}catch(e){}
+    var r=await sb.auth.signUp({email:em,password:pw,options:{emailRedirectTo:location.href.split('#')[0].split('?')[0]}});
+    if(r.error)throw new Error(/registered|exists/i.test(r.error.message)?'이미 가입된 이메일입니다. 로그인해 주세요':('가입 실패: '+r.error.message));
+    if(r.data&&r.data.session){await enterAdmin();return;}
+    gateMsg('📧 '+em+' 으로 확인 메일을 보냈습니다.\n메일의 링크를 누르면 관리자 등록이 끝납니다.\n(링크가 오류 화면으로 열려도 괜찮습니다. 이 페이지로 돌아와 로그인하세요)',true);
+    document.getElementById('gate-ok').style.whiteSpace='pre-line';
+  }catch(e){gateMsg(e.message||'가입 실패');}
+  finally{btn.disabled=false;btn.textContent=gateMode==='signup'?'관리자 계정 만들기':'로그인';}
+}
 async function enterAdmin(){
   var a=await sb.rpc('is_admin');
+  if(!a.error&&!a.data){
+    var code='';try{code=localStorage.getItem('c_setup_code')||'';}catch(e){}
+    var f=document.getElementById('gate-code');if(f&&f.value.trim())code=f.value.trim().toUpperCase();
+    if(code){var c=await sb.rpc('claim_admin',{setup_code:code});if(!c.error&&c.data){a={data:true};toast('관리자 등록이 완료되었습니다');}}
+  }
   if(a.error||!a.data){await sb.auth.signOut();throw new Error('관리자로 등록되지 않은 계정입니다');}
+  try{localStorage.removeItem('c_setup_code');}catch(e){}
   var r=await sb.from('site_content').select('key,value');
   if(r.error)throw new Error('데이터를 불러오지 못했습니다: '+r.error.message);
   var rows=r.data||[];
